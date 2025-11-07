@@ -134,7 +134,7 @@ export default function App() {
   const [firstName, setFirstName] = useState("");
   const [lastName, setLastName] = useState("");
   const [email, setEmail] = useState("");
-  const [country, setCountry] = useState("ROU"); // ISO3
+  const [country, setCountry] = useState("USA"); // ISO3
   const [town, setTown] = useState("");
   const [address, setAddress] = useState("");
   const [state, setState] = useState(""); // optional, required for USA
@@ -343,17 +343,20 @@ export default function App() {
                     />
                   </label>
 
+                  {isUSA && (
                   <label className="font-bold">
-                    State {isUSA ? "(USPS, required)" : "(optional)"}
+                    State (USPS, required)
                     <input
                       value={state}
-                      onChange={(e) => setState(isUSA ? e.target.value.toUpperCase() : e.target.value)}
-                      placeholder={isUSA ? "CA, NY, TX..." : ""}
-                      maxLength={isUSA ? 2 : 64}
-                      required={isUSA}
+                      onChange={(e) => setState(e.target.value.toUpperCase())}
+                      placeholder="CA, NY, TX..."
+                      maxLength={2}
+                      required
                       className="mt-1 w-full rounded-xl border border-gray-300 px-4 py-3 text-base shadow-sm focus:border-black focus:outline-none"
                     />
                   </label>
+                )}
+
                 </div>
 
                 <div className="mt-2 flex gap-3">
