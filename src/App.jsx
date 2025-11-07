@@ -1,4 +1,5 @@
-import { useEffect, useRef, useState } from "react";
+// App.jsx
+import { useRef, useState } from "react";
 import { Onfido } from "onfido-sdk-ui";
 
 const CONFIG = {
@@ -6,7 +7,6 @@ const CONFIG = {
   navbars: { success: "/success-banner.png", failure: "/faile-banner.png" },
   supportPhone: "1 (800) 999-0000",
   referenceCode: "Onboarding Verification 05jx1-0fmt",
-  autoRedirectMs: 5000,
 };
 
 const WORKFLOW_ID = import.meta.env.VITE_WORKFLOW_ID || "";
@@ -16,11 +16,11 @@ const api = (path) => `${API_ORIGIN}${path}`;
 async function fetchJSON(url, opts = {}) {
   const res = await fetch(url, opts);
   const data = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(data?.error || JSON.stringify(data));
+  if (!res.ok) throw Object.assign(new Error(data?.error || "Request failed"), { details: data?.details });
   return data;
 }
 
-async function waitForWebhook(runId, { tries = 100, intervalMs = 5000 } = {}) {
+async function waitForWebhook(runId, { tries = 100, intervalMs = 3000 } = {}) {
   for (let i = 0; i < tries; i++) {
     try {
       const data = await fetchJSON(api(`/api/webhook_runs/${encodeURIComponent(runId)}`));
@@ -52,7 +52,7 @@ function OverlayCard({ title, subtitle, onClose, children }) {
   );
 }
 
-function WhiteScreen({ title, subtitle, ok, danger, onBack, onRetry, navbarUrl }) {
+function WhiteScreen({ title, subtitle, ok, danger, onBack, onRetry, navbarUrl, children }) {
   return (
     <div className="fixed inset-0 z-30 overflow-auto bg-white">
       {navbarUrl && (
@@ -92,37 +92,29 @@ function WhiteScreen({ title, subtitle, ok, danger, onBack, onRetry, navbarUrl }
           )}
         </div>
       </div>
+
+      {/* 🔽 AICI randăm sumarul */}
+      {children && (
+        <div className="mx-auto my-10 w-full max-w-3xl px-4">
+          {children}
+        </div>
+      )}
     </div>
   );
 }
 
+
 function FullBg({ view, children, clickable = false, onActivate }) {
   const wantsBg = view === "home" || view === "form" || view === "workflow";
-  const bg = CONFIG.backgrounds[view] || CONFIG.backgrounds.home;
-
-  const handleKeyDown = (e) => {
-    if (!clickable) return;
-    if (e.key === "Enter" || e.key === " ") {
-      e.preventDefault();
-      onActivate?.();
-    }
-  };
-
-  if (!wantsBg || !bg) return <>{children}</>;
-
+  const bg = { home: "/bank2.png", form: "/bank2.png", workflow: "/bank2.png" }[view] || "/bank2.png";
+  if (!wantsBg) return <>{children}</>;
   return (
     <div
-      className={
-        "min-h-[100svh] bg-cover bg-center bg-no-repeat " +
-        (clickable ? "cursor-pointer outline-none" : "")
-      }
+      className={"min-h-[100svh] bg-cover bg-center bg-no-repeat " + (clickable ? "cursor-pointer" : "")}
       style={{ backgroundImage: `url(${bg})` }}
       onClick={clickable ? onActivate : undefined}
-      onKeyDown={clickable ? handleKeyDown : undefined}
       role={clickable ? "button" : undefined}
       tabIndex={clickable ? 0 : undefined}
-      aria-label={clickable ? "Start identity verification" : undefined}
-      title={clickable ? "Click to start identity verification" : undefined}
     >
       {children}
     </div>
@@ -133,111 +125,75 @@ function InfoRow({ label, value }) {
   return (
     <div className="grid grid-cols-1 gap-1 rounded-2xl border border-gray-200 bg-white p-4 shadow-sm sm:grid-cols-3">
       <div className="text-sm font-semibold uppercase tracking-wide text-gray-500">{label}</div>
-      <div className="sm:col-span-2 text-gray-900">{String(value ?? "—")}</div>
+      <div className="sm:col-span-2 text-gray-900 break-words">{String(value ?? "—")}</div>
     </div>
   );
 }
 
 export default function App() {
   const [view, setView] = useState("home"); // home | form | workflow | pending | error | final
-  const [firstName, setFirstName] = useState("Razvan");
-  const [lastName, setLastName] = useState("Blaga");
-  const [email, setEmail] = useState("razvanblaga10@gmail.com");
+  const [firstName, setFirstName] = useState("");
+  const [lastName, setLastName] = useState("");
+  const [email, setEmail] = useState("");
+  const [country, setCountry] = useState("ROU"); // ISO3
+  const [town, setTown] = useState("");
+  const [address, setAddress] = useState("");
+  const [state, setState] = useState(""); // optional
+  const [postcode, setPostcode] = useState(""); // optional
+
   const [loading, setLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState("");
   const [runId, setRunId] = useState(null);
   const [finalData, setFinalData] = useState(null);
 
   const onfidoRef = useRef(null);
-  const redirectTimerRef = useRef(null);
-
-  // Demo shortcuts use the same keys as Onfido output
-  useEffect(() => {
-    const url = new URL(window.location.href);
-    const force = (url.searchParams.get("force") || "").toLowerCase();
-    if (!force) return;
-    if (force === "approved") {
-      setFinalData({
-        status: "approved",
-        full_name: "Razvan Blaga",
-        address: "Strada Exemplu 1, Bucuresti",
-        gender: "M",
-        dob: "1992-06-15",
-        document_number: "RO1234567",
-        document_type: "passport",
-        date_expiry: "2032-06-15",
-        workflow_run_id: "demo123",
-      });
-      setView("final");
-    } else if (force === "failed") {
-      setFinalData({
-        status: "review",
-        full_name: "Razvan Blaga",
-        address: "Strada Exemplu 1, Bucuresti",
-        gender: "M",
-        dob: "1992-06-15",
-        document_number: "RO1234567",
-        document_type: "passport",
-        date_expiry: "2032-06-15",
-        workflow_run_id: "demo123",
-      });
-      setView("final");
-    }
-  }, []);
-
-  function startRedirectCountdown() {
-    clearTimeout(redirectTimerRef.current);
-    redirectTimerRef.current = setTimeout(() => {
-      if (runId) {
-        loadFinalData(runId);
-      } else {
-        setErrorMsg("Missing workflow run id");
-        setView("error");
-      }
-    }, CONFIG.autoRedirectMs);
-  }
 
   async function loadFinalData(id) {
-    try {
-      const [runData, webhookData] = await Promise.all([
-        fetchJSON(api(`/api/workflow_runs/${encodeURIComponent(id)}`)),
-        fetchJSON(api(`/api/webhook_runs/${encodeURIComponent(id)}`)).catch(() => null),
-      ]);
-
-      setFinalData({
-        status: runData.status,
-        full_name: runData.full_name ?? null,
-        address: runData.address ?? null,
-        gender: runData.gender ?? null,
-        dob: runData.dob ?? null,
-        document_type: runData.document_type ?? null,
-        document_number: runData.document_number ?? null,
-        date_expiry: runData.date_expiry ?? null,
-        workflow_run_id: runData.workflow_run_id,
-        dashboard_url: runData.dashboard_url,
-        webhook: webhookData || null,
-      });
-      setView("final");
-    } catch (e) {
-      setErrorMsg(e.message || String(e));
-      setView("error");
-    }
+    const [runData, webhookData] = await Promise.all([
+      fetchJSON(api(`/api/workflow_runs/${encodeURIComponent(id)}`)),
+      fetchJSON(api(`/api/webhook_runs/${encodeURIComponent(id)}`)).catch(() => null),
+    ]);
+    setFinalData({
+      status: runData.status,
+      full_name:
+        runData.full_name ||
+        [runData.first_name, runData.last_name].filter(Boolean).join(" "),
+      address_formatted:
+        runData.address_formatted ??
+        (typeof runData.address === "string" ? runData.address : null),
+      gender: runData.gender ?? null,
+      dob: runData.dob ?? null,
+      document_type: runData.document_type ?? null,
+      document_number: runData.document_number ?? null,
+      date_expiry: runData.date_expiry ?? null,
+      workflow_run_id: runData.workflow_run_id,
+      dashboard_url: runData.dashboard_url,
+      webhook: webhookData || null,
+    });
+    setView("final");
   }
 
   async function handleSubmit(e) {
     e.preventDefault();
     setLoading(true);
-    setErrorMsg("");
+    setErrorMsg(""); // mesaj text (fără payload)
 
     try {
-      // 1) create applicant with form names
       const applicant = await fetchJSON(api(`/api/applicants`), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ first_name: firstName, last_name: lastName, email }),
+        body: JSON.stringify({
+          first_name: firstName,
+          last_name: lastName,
+          email,
+          country,
+          town,
+          address,
+          state,
+          postcode,
+        }),
       });
 
-      // 2) start workflow
       const run = await fetchJSON(api(`/api/workflow_runs`), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -247,7 +203,6 @@ export default function App() {
       setRunId(run.id);
       setView("workflow");
 
-      // 3) mount Onfido SDK
       onfidoRef.current?.tearDown?.();
       onfidoRef.current = Onfido.init({
         token: run.sdk_token,
@@ -259,18 +214,17 @@ export default function App() {
             await waitForWebhook(run.id);
             await loadFinalData(run.id);
           } catch (err) {
-            setErrorMsg(err.message || String(err));
+            setErrorMsg(err?.message || "Something went wrong.");
             setView("error");
           }
         },
         onError: (err) => {
-          console.error("Onfido error:", err);
           setErrorMsg(err?.message || "Something went wrong.");
           setView("error");
         },
       });
     } catch (err) {
-      setErrorMsg(err.message || String(err));
+      setErrorMsg(err?.message || "Something went wrong.");
       setView("error");
     } finally {
       setLoading(false);
@@ -280,20 +234,24 @@ export default function App() {
   function closeAndCleanup() {
     onfidoRef.current?.tearDown?.();
     onfidoRef.current = null;
-    clearTimeout(redirectTimerRef.current);
     setView("home");
     setRunId(null);
     setErrorMsg("");
     setFinalData(null);
   }
 
-  useEffect(() => () => closeAndCleanup(), []);
-
-  const startForm = () => setView("form");
   const isApproved = (finalData?.status || "").toLowerCase() === "approved";
+  const computedFullName =
+    finalData?.full_name || [firstName, lastName].filter(Boolean).join(" ");
+
+  // ✅ mesaj clar pentru FAIL, din webhook dacă există
+  const errorReason =
+    finalData?.webhook?.raw_payload?.payload?.resource?.error?.message ||
+    finalData?.webhook?.payload?.resource?.error?.message ||
+    (!isApproved ? "Verification requires manual review." : undefined);
 
   return (
-    <FullBg view={view} clickable={view === "home"} onActivate={startForm}>
+    <FullBg view={view} clickable={view === "home"} onActivate={() => setView("form")}>
       <div className="min-h-[100svh]">
         {(view === "form" || view === "workflow") && (
           <OverlayCard
@@ -302,30 +260,75 @@ export default function App() {
           >
             {view === "form" ? (
               <form onSubmit={handleSubmit} className="grid gap-4">
-                <label className="font-bold">
-                  First name
-                  <input
-                    value={firstName}
-                    onChange={(e) => setFirstName(e.target.value)}
-                    required
-                    className="mt-1 w-full rounded-xl border border-gray-300 px-4 py-3 text-base shadow-sm focus:border-black focus:outline-none"
-                  />
-                </label>
-                <label className="font-bold">
-                  Last name
-                  <input
-                    value={lastName}
-                    onChange={(e) => setLastName(e.target.value)}
-                    required
-                    className="mt-1 w-full rounded-xl border border-gray-300 px-4 py-3 text-base shadow-sm focus:border-black focus:outline-none"
-                  />
-                </label>
+                <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                  <label className="font-bold">
+                    First name
+                    <input
+                      value={firstName}
+                      onChange={(e) => setFirstName(e.target.value)}
+                      required
+                      className="mt-1 w-full rounded-xl border border-gray-300 px-4 py-3 text-base shadow-sm focus:border-black focus:outline-none"
+                    />
+                  </label>
+                  <label className="font-bold">
+                    Last name
+                    <input
+                      value={lastName}
+                      onChange={(e) => setLastName(e.target.value)}
+                      required
+                      className="mt-1 w-full rounded-xl border border-gray-300 px-4 py-3 text-base shadow-sm focus:border-black focus:outline-none"
+                    />
+                  </label>
+                </div>
+
                 <label className="font-bold">
                   Email
                   <input
                     type="email"
                     value={email}
                     onChange={(e) => setEmail(e.target.value)}
+                    className="mt-1 w-full rounded-xl border border-gray-300 px-4 py-3 text-base shadow-sm focus:border-black focus:outline-none"
+                  />
+                </label>
+
+                <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+                  <label className="font-bold">
+                    Country (ISO3)
+                    <input
+                      value={country}
+                      onChange={(e) => setCountry(e.target.value.toUpperCase())}
+                      placeholder="ROU"
+                      maxLength={3}
+                      required
+                      className="mt-1 w-full rounded-xl border border-gray-300 px-4 py-3 text-base shadow-sm focus:border-black focus:outline-none"
+                    />
+                  </label>
+                  <label className="font-bold">
+                    City (Town)
+                    <input
+                      value={town}
+                      onChange={(e) => setTown(e.target.value)}
+                      required
+                      className="mt-1 w-full rounded-xl border border-gray-300 px-4 py-3 text-base shadow-sm focus:border-black focus:outline-none"
+                    />
+                  </label>
+                  <label className="font-bold">
+                    Zip (optional)
+                    <input
+                      value={postcode}
+                      onChange={(e) => setPostcode(e.target.value)}
+                      className="mt-1 w-full rounded-xl border border-gray-300 px-4 py-3 text-base shadow-sm focus:border-black focus:outline-none"
+                    />
+                  </label>
+                </div>
+
+                <label className="font-bold">
+                  Address
+                  <input
+                    value={address}
+                    onChange={(e) => setAddress(e.target.value)}
+                    placeholder="Ex: Street 123, Building X, Apt 10"
+                    required
                     className="mt-1 w-full rounded-xl border border-gray-300 px-4 py-3 text-base shadow-sm focus:border-black focus:outline-none"
                   />
                 </label>
@@ -346,6 +349,7 @@ export default function App() {
           </OverlayCard>
         )}
 
+        {/* pending page (după onComplete, cât așteptăm webhook-ul) */}
         {view === "pending" && (
           <WhiteScreen
             title="Thank you for uploading"
@@ -356,11 +360,13 @@ export default function App() {
           />
         )}
 
+        {/* erori runtime: banner roșu, text simplu */}
         {view === "error" && (
           <WhiteScreen
             title="Something went wrong"
             subtitle="We couldn't complete your verification."
             danger={errorMsg}
+            navbarUrl={CONFIG.navbars.failure}
             onBack={closeAndCleanup}
             onRetry={() => {
               setView("form");
@@ -369,62 +375,37 @@ export default function App() {
           />
         )}
 
+        {/* FINAL: success/fail, cu banner + sumar dedesubt */}
         {view === "final" && finalData && (
-          <div className="mx-auto my-10 w-full max-w-3xl px-4">
-            <div className="mb-6 flex items-center justify-between">
-              <h1 className="text-3xl font-extrabold tracking-tight">
-                {isApproved ? "You're approved ✅" : "We need to do further verification"}
-              </h1>
-              <button
-                onClick={closeAndCleanup}
-                className="rounded-xl border border-black/10 bg-white px-4 py-2 font-bold shadow-sm hover:bg-gray-50"
-              >
-                Back to home
-              </button>
-            </div>
+  <WhiteScreen
+    title={isApproved ? "You're approved ✅" : "We need to do further verification"}
+    subtitle={
+      isApproved
+        ? "Your verification looks good."
+        : `Please call us at ${CONFIG.supportPhone} and reference ${CONFIG.referenceCode}.`
+    }
+    navbarUrl={isApproved ? CONFIG.navbars.success : CONFIG.navbars.failure}
+    onBack={closeAndCleanup}
+    onRetry={!isApproved ? () => setView("form") : undefined}
+    ok={isApproved}
+    danger={!isApproved ? errorReason : undefined}
+  >
+    {/* ⬇️ SUMARUL e acum VIZIBIL în overlay */}
+    <div className="grid gap-4">
+      <InfoRow label="Verification status" value={finalData.status} />
+      <InfoRow label="Full name" value={computedFullName || "—"} />
+      <InfoRow label="Address" value={finalData.address_formatted} />
+      <InfoRow label="Gender" value={finalData.gender} />
+      <InfoRow label="Date of birth" value={finalData.dob} />
+      <InfoRow label="Document number" value={finalData.document_number} />
+      <InfoRow label="Document type" value={finalData.document_type} />
+      <InfoRow label="Date of expiry" value={finalData.date_expiry} />
+      
 
-            {!isApproved && (
-              <div className="mb-6 rounded-2xl border border-rose-200 bg-rose-50 p-4 text-rose-800">
-                <p className="font-semibold">Status: {finalData.status ?? "unknown"}</p>
-                <p className="text-sm mt-1">
-                  Please call us at <span className="font-bold">{CONFIG.supportPhone}</span> and reference
-                  <span className="font-bold"> {CONFIG.referenceCode}</span>.
-                </p>
-              </div>
-            )}
+    </div>
+  </WhiteScreen>
+)}
 
-            <p className="mb-6 text-gray-700">
-              Here is a summary of the details we extracted from your document. If anything looks off, please contact support.
-            </p>
-
-            {/* Show on both success and fail */}
-            <div className="grid gap-4">
-              <InfoRow
-                label="Full name"
-                value={finalData.full_name || `${firstName} ${lastName}`.trim()}
-              />
-              <InfoRow label="Address" value={finalData.address} />
-              <InfoRow label="Verification status" value={finalData.status} />
-              <InfoRow label="Gender" value={finalData.gender} />
-              <InfoRow label="Date of birth" value={finalData.dob} />
-              <InfoRow label="Document number" value={finalData.document_number} />
-              <InfoRow label="Document type" value={finalData.document_type} />
-              <InfoRow label="Date of expiry" value={finalData.date_expiry} />
-              {finalData.workflow_run_id && <InfoRow label="Workflow run" value={finalData.workflow_run_id} />}
-            </div>
-
-            {finalData.webhook && (
-              <div className="mt-8">
-                <h2 className="text-xl font-extrabold mb-2">Webhook payload</h2>
-                <div className="rounded-2xl border border-gray-200 bg-gray-50 p-4 overflow-x-auto">
-                  <pre className="text-xs leading-snug">
-{JSON.stringify(finalData.webhook.raw_payload || finalData.webhook, null, 2)}
-                  </pre>
-                </div>
-              </div>
-            )}
-          </div>
-        )}
       </div>
     </FullBg>
   );
