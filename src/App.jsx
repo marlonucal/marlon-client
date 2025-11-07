@@ -93,7 +93,7 @@ function WhiteScreen({ title, subtitle, ok, danger, onBack, onRetry, navbarUrl, 
         </div>
       </div>
 
-      {/* 🔽 AICI randăm sumarul */}
+      {/* Summary inside the overlay */}
       {children && (
         <div className="mx-auto my-10 w-full max-w-3xl px-4">
           {children}
@@ -102,7 +102,6 @@ function WhiteScreen({ title, subtitle, ok, danger, onBack, onRetry, navbarUrl, 
     </div>
   );
 }
-
 
 function FullBg({ view, children, clickable = false, onActivate }) {
   const wantsBg = view === "home" || view === "form" || view === "workflow";
@@ -138,15 +137,16 @@ export default function App() {
   const [country, setCountry] = useState("ROU"); // ISO3
   const [town, setTown] = useState("");
   const [address, setAddress] = useState("");
-  const [state, setState] = useState(""); // optional
+  const [state, setState] = useState(""); // optional, required for USA
   const [postcode, setPostcode] = useState(""); // optional
 
   const [loading, setLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState("");
-  const [runId, setRunId] = useState(null);
   const [finalData, setFinalData] = useState(null);
 
   const onfidoRef = useRef(null);
+
+  const isUSA = (country || "").toUpperCase() === "USA";
 
   async function loadFinalData(id) {
     const [runData, webhookData] = await Promise.all([
@@ -176,7 +176,19 @@ export default function App() {
   async function handleSubmit(e) {
     e.preventDefault();
     setLoading(true);
-    setErrorMsg(""); // mesaj text (fără payload)
+    setErrorMsg(""); // banner text
+
+    // ✅ Client-side rule: if USA, state is required and must be 2-letter USPS
+    const ctry = (country || "").toUpperCase().trim();
+    const usState = (state || "").toUpperCase().trim();
+    if (ctry === "USA") {
+      if (!/^[A-Z]{2}$/.test(usState)) {
+        setLoading(false);
+        setErrorMsg("State is required for US addresses (use two-letter USPS code, e.g., CA, NY).");
+        setView("error");
+        return;
+      }
+    }
 
     try {
       const applicant = await fetchJSON(api(`/api/applicants`), {
@@ -186,10 +198,10 @@ export default function App() {
           first_name: firstName,
           last_name: lastName,
           email,
-          country,
+          country: ctry,
           town,
           address,
-          state,
+          state: ctry === "USA" ? usState : state, // send normalized 2-letter for USA
           postcode,
         }),
       });
@@ -200,7 +212,6 @@ export default function App() {
         body: JSON.stringify({ workflow_id: WORKFLOW_ID, applicant_id: applicant.id }),
       });
 
-      setRunId(run.id);
       setView("workflow");
 
       onfidoRef.current?.tearDown?.();
@@ -235,7 +246,6 @@ export default function App() {
     onfidoRef.current?.tearDown?.();
     onfidoRef.current = null;
     setView("home");
-    setRunId(null);
     setErrorMsg("");
     setFinalData(null);
   }
@@ -244,7 +254,6 @@ export default function App() {
   const computedFullName =
     finalData?.full_name || [firstName, lastName].filter(Boolean).join(" ");
 
-  // ✅ mesaj clar pentru FAIL, din webhook dacă există
   const errorReason =
     finalData?.webhook?.raw_payload?.payload?.resource?.error?.message ||
     finalData?.webhook?.payload?.resource?.error?.message ||
@@ -322,16 +331,30 @@ export default function App() {
                   </label>
                 </div>
 
-                <label className="font-bold">
-                  Address
-                  <input
-                    value={address}
-                    onChange={(e) => setAddress(e.target.value)}
-                    placeholder="Ex: Street 123, Building X, Apt 10"
-                    required
-                    className="mt-1 w-full rounded-xl border border-gray-300 px-4 py-3 text-base shadow-sm focus:border-black focus:outline-none"
-                  />
-                </label>
+                <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+                  <label className="font-bold sm:col-span-2">
+                    Address
+                    <input
+                      value={address}
+                      onChange={(e) => setAddress(e.target.value)}
+                      placeholder="Ex: Street 123, Building X, Apt 10"
+                      required
+                      className="mt-1 w-full rounded-xl border border-gray-300 px-4 py-3 text-base shadow-sm focus:border-black focus:outline-none"
+                    />
+                  </label>
+
+                  <label className="font-bold">
+                    State {isUSA ? "(USPS, required)" : "(optional)"}
+                    <input
+                      value={state}
+                      onChange={(e) => setState(isUSA ? e.target.value.toUpperCase() : e.target.value)}
+                      placeholder={isUSA ? "CA, NY, TX..." : ""}
+                      maxLength={isUSA ? 2 : 64}
+                      required={isUSA}
+                      className="mt-1 w-full rounded-xl border border-gray-300 px-4 py-3 text-base shadow-sm focus:border-black focus:outline-none"
+                    />
+                  </label>
+                </div>
 
                 <div className="mt-2 flex gap-3">
                   <button
@@ -349,7 +372,6 @@ export default function App() {
           </OverlayCard>
         )}
 
-        {/* pending page (după onComplete, cât așteptăm webhook-ul) */}
         {view === "pending" && (
           <WhiteScreen
             title="Thank you for uploading"
@@ -360,7 +382,6 @@ export default function App() {
           />
         )}
 
-        {/* erori runtime: banner roșu, text simplu */}
         {view === "error" && (
           <WhiteScreen
             title="Something went wrong"
@@ -375,37 +396,32 @@ export default function App() {
           />
         )}
 
-        {/* FINAL: success/fail, cu banner + sumar dedesubt */}
         {view === "final" && finalData && (
-  <WhiteScreen
-    title={isApproved ? "You're approved ✅" : "We need to do further verification"}
-    subtitle={
-      isApproved
-        ? "Your verification looks good."
-        : `Please call us at ${CONFIG.supportPhone} and reference ${CONFIG.referenceCode}.`
-    }
-    navbarUrl={isApproved ? CONFIG.navbars.success : CONFIG.navbars.failure}
-    onBack={closeAndCleanup}
-    onRetry={!isApproved ? () => setView("form") : undefined}
-    ok={isApproved}
-    danger={!isApproved ? errorReason : undefined}
-  >
-    {/* ⬇️ SUMARUL e acum VIZIBIL în overlay */}
-    <div className="grid gap-4">
-      <InfoRow label="Verification status" value={finalData.status} />
-      <InfoRow label="Full name" value={computedFullName || "—"} />
-      <InfoRow label="Address" value={finalData.address_formatted} />
-      <InfoRow label="Gender" value={finalData.gender} />
-      <InfoRow label="Date of birth" value={finalData.dob} />
-      <InfoRow label="Document number" value={finalData.document_number} />
-      <InfoRow label="Document type" value={finalData.document_type} />
-      <InfoRow label="Date of expiry" value={finalData.date_expiry} />
-      
-
-    </div>
-  </WhiteScreen>
-)}
-
+          <WhiteScreen
+            title={isApproved ? "You're approved ✅" : "We need to do further verification"}
+            subtitle={
+              isApproved
+                ? "Your verification looks good."
+                : `Please call us at ${CONFIG.supportPhone} and reference ${CONFIG.referenceCode}.`
+            }
+            navbarUrl={isApproved ? CONFIG.navbars.success : CONFIG.navbars.failure}
+            onBack={closeAndCleanup}
+            onRetry={!isApproved ? () => setView("form") : undefined}
+            ok={isApproved}
+            danger={!isApproved ? errorReason : undefined}
+          >
+            <div className="grid gap-4">
+              <InfoRow label="Verification status" value={finalData.status} />
+              <InfoRow label="Full name" value={computedFullName || "—"} />
+              <InfoRow label="Address" value={finalData.address_formatted} />
+              <InfoRow label="Gender" value={finalData.gender} />
+              <InfoRow label="Date of birth" value={finalData.dob} />
+              <InfoRow label="Document number" value={finalData.document_number} />
+              <InfoRow label="Document type" value={finalData.document_type} />
+              <InfoRow label="Date of expiry" value={finalData.date_expiry} />
+            </div>
+          </WhiteScreen>
+        )}
       </div>
     </FullBg>
   );
