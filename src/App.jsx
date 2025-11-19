@@ -4,7 +4,7 @@ import { Onfido } from "onfido-sdk-ui";
 
 const CONFIG = {
   backgrounds: { home: "/bank2.png", form: "/bank2.png", workflow: "/bank2.png" },
-  navbars: { success: "/success-banner.png", failure: "/faile-banner.png" },
+  navbars: { success: "/success-banner.png", failure: "/fail-banner.png" },
   supportPhone: "1 (800) 999-0000",
   referenceCode: "Onboarding Verification 05jx1-0fmt",
 };
@@ -57,8 +57,14 @@ function WhiteScreen({ title, subtitle, ok, danger, onBack, onRetry, navbarUrl, 
     <div className="fixed inset-0 z-30 overflow-auto bg-white">
       {navbarUrl && (
         <div
-          className="h-24 w-full bg-cover bg-center"
-          style={{ backgroundImage: `url(${navbarUrl})` }}
+          className="w-full"
+          style={{
+            height:"110px",
+            backgroundPosition:"top center",
+            backgoundRepeat:"no-repeat",
+            backgroundSize:"contain",
+            paddingTop:"0px",
+            backgroundImage: `url(${navbarUrl})` }}
           aria-hidden="true"
         />
       )}
