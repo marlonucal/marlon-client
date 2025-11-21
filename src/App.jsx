@@ -1,4 +1,3 @@
-// App.jsx
 import { useRef, useState } from "react";
 import { Onfido } from "onfido-sdk-ui";
 
@@ -20,15 +19,26 @@ async function fetchJSON(url, opts = {}) {
   return data;
 }
 
-async function waitForWebhook(runId, { tries = 100, intervalMs = 3000 } = {}) {
+async function waitForWebhook(runId, { tries = 200, intervalMs = 2000 } = {}) {
   for (let i = 0; i < tries; i++) {
     try {
       const data = await fetchJSON(api(`/api/webhook_runs/${encodeURIComponent(runId)}`));
-      return data;
+      
+      // CRITICAL CHANGE: Do not return if status is "processing".
+      // We must wait for the final status (approved, declined, review) 
+      // to ensure we have received ALL webhooks, including the data extraction one.
+      const status = (data.status || "").toLowerCase();
+      
+      if (status === "approved" || status === "declined" || status === "review" || status === "abandoned") {
+          return data;
+      }
+      
+      // Optional: If you see 'processing' but already have the data, you COULD return, 
+      // but it's safer to wait for the final flag to catch all 9 webhooks.
     } catch {}
     await new Promise((r) => setTimeout(r, intervalMs));
   }
-  throw new Error("Timeout waiting for webhook");
+  throw new Error("Timeout waiting for completion");
 }
 
 function OverlayCard({ title, subtitle, onClose, children }) {
@@ -52,30 +62,21 @@ function OverlayCard({ title, subtitle, onClose, children }) {
   );
 }
 
-function WhiteScreen({ title, subtitle, ok, danger, onBack, onRetry, navbarUrl, children }) {
+function WhiteScreen({ title, subtitle, danger, onBack, onRetry, navbarUrl, children }) {
   return (
     <div className="fixed inset-0 z-30 overflow-auto bg-white">
       {navbarUrl && (
-        <div
-          className="w-full"
-          style={{
-            height:"110px",
-            backgroundPosition:"top center",
-            backgoundRepeat:"no-repeat",
-            backgroundSize:"contain",
-            paddingTop:"0px",
-            backgroundImage: `url(${navbarUrl})` }}
-          aria-hidden="true"
+        <img 
+          src={navbarUrl} 
+          alt="Banner" 
+          className="w-full h-auto block"
         />
       )}
+      
       <div className="mx-auto max-w-xl px-6 py-6">
         <h1 className="text-2xl font-extrabold text-gray-900">{title}</h1>
         {subtitle && <p className="mt-2 text-gray-600">{subtitle}</p>}
-        {ok && (
-          <div className="mt-3 rounded-xl border border-emerald-200 bg-emerald-50 p-3 text-emerald-800">
-            ✓ Verification submitted. You can close this window.
-          </div>
-        )}
+        
         {danger && (
           <div className="mt-3 rounded-xl border border-rose-200 bg-rose-50 p-3 text-rose-800">
             ⚠ {danger}
@@ -99,7 +100,6 @@ function WhiteScreen({ title, subtitle, ok, danger, onBack, onRetry, navbarUrl, 
         </div>
       </div>
 
-      {/* Summary inside the overlay */}
       {children && (
         <div className="mx-auto my-10 w-full max-w-3xl px-4">
           {children}
@@ -126,25 +126,48 @@ function FullBg({ view, children, clickable = false, onActivate }) {
   );
 }
 
-function InfoRow({ label, value }) {
+function ResultBadge({ value }) {
+  const normalized = (value || "").toLowerCase();
+  const isClear = normalized === "clear";
+  const isConsider = normalized === "consider";
+  
+  let bgColor = "bg-gray-100";
+  let textColor = "text-gray-600";
+  let label = value || "—";
+
+  if (isClear) {
+    bgColor = "bg-green-100";
+    textColor = "text-green-800";
+    label = "Clear";
+  } else if (isConsider) {
+    bgColor = "bg-orange-100";
+    textColor = "text-orange-800";
+    label = "Consider";
+  }
+
   return (
-    <div className="grid grid-cols-1 gap-1 rounded-2xl border border-gray-200 bg-white p-4 shadow-sm sm:grid-cols-3">
+    <span className={`inline-flex items-center px-3 py-1 rounded-full text-sm font-bold ${bgColor} ${textColor}`}>
+      {label}
+    </span>
+  );
+}
+
+function InfoRow({ label, value, isBadge }) {
+  return (
+    <div className="grid grid-cols-1 gap-1 rounded-2xl border border-gray-200 bg-white p-4 shadow-sm sm:grid-cols-3 items-center">
       <div className="text-sm font-semibold uppercase tracking-wide text-gray-500">{label}</div>
-      <div className="sm:col-span-2 text-gray-900 break-words">{String(value ?? "—")}</div>
+      <div className="sm:col-span-2 text-gray-900 break-words font-medium">
+        {isBadge ? <ResultBadge value={value} /> : String(value ?? "—")}
+      </div>
     </div>
   );
 }
 
 export default function App() {
-  const [view, setView] = useState("home"); // home | form | workflow | pending | error | final
+  const [view, setView] = useState("home"); 
   const [firstName, setFirstName] = useState("");
   const [lastName, setLastName] = useState("");
   const [email, setEmail] = useState("");
-  const [country, setCountry] = useState("USA"); // ISO3
-  const [town, setTown] = useState("");
-  const [address, setAddress] = useState("");
-  const [state, setState] = useState(""); // optional, required for USA
-  const [postcode, setPostcode] = useState(""); // optional
 
   const [loading, setLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState("");
@@ -152,29 +175,31 @@ export default function App() {
 
   const onfidoRef = useRef(null);
 
-  const isUSA = (country || "").toUpperCase() === "USA";
-
   async function loadFinalData(id) {
     const [runData, webhookData] = await Promise.all([
       fetchJSON(api(`/api/workflow_runs/${encodeURIComponent(id)}`)),
       fetchJSON(api(`/api/webhook_runs/${encodeURIComponent(id)}`)).catch(() => null),
     ]);
+
+    // Combine outputs from the API run call and the accumulated webhook data
+    const combinedOutput = {
+      ...(runData.output || {}),
+      ...(webhookData?.raw_output || {}),
+    };
+    
     setFinalData({
       status: runData.status,
-      full_name:
-        runData.full_name ||
-        [runData.first_name, runData.last_name].filter(Boolean).join(" "),
-      address_formatted:
-        runData.address_formatted ??
-        (typeof runData.address === "string" ? runData.address : null),
-      gender: runData.gender ?? null,
-      dob: runData.dob ?? null,
-      document_type: runData.document_type ?? null,
-      document_number: runData.document_number ?? null,
-      date_expiry: runData.date_expiry ?? null,
+      full_name: runData.full_name || [combinedOutput.first_name, combinedOutput.last_name].filter(Boolean).join(" ") || [runData.first_name, runData.last_name].filter(Boolean).join(" "),
       workflow_run_id: runData.workflow_run_id,
       dashboard_url: runData.dashboard_url,
       webhook: webhookData || null,
+      
+      address: combinedOutput.address,
+      gender: combinedOutput.gender,
+      dob: combinedOutput.dob,
+      document_number: combinedOutput.document_number,
+      document_type: combinedOutput.document_type,
+      date_expiry: combinedOutput.date_expiry,
     });
     setView("final");
   }
@@ -182,19 +207,7 @@ export default function App() {
   async function handleSubmit(e) {
     e.preventDefault();
     setLoading(true);
-    setErrorMsg(""); // banner text
-
-    // ✅ Client-side rule: if USA, state is required and must be 2-letter USPS
-    const ctry = (country || "").toUpperCase().trim();
-    const usState = (state || "").toUpperCase().trim();
-    if (ctry === "USA") {
-      if (!/^[A-Z]{2}$/.test(usState)) {
-        setLoading(false);
-        setErrorMsg("State is required for US addresses (use two-letter USPS code, e.g., CA, NY).");
-        setView("error");
-        return;
-      }
-    }
+    setErrorMsg("");
 
     try {
       const applicant = await fetchJSON(api(`/api/applicants`), {
@@ -204,11 +217,6 @@ export default function App() {
           first_name: firstName,
           last_name: lastName,
           email,
-          country: ctry,
-          town,
-          address,
-          state: ctry === "USA" ? usState : state, // send normalized 2-letter for USA
-          postcode,
         }),
       });
 
@@ -254,16 +262,34 @@ export default function App() {
     setView("home");
     setErrorMsg("");
     setFinalData(null);
+    setFirstName("");
+    setLastName("");
+    setEmail("");
   }
 
   const isApproved = (finalData?.status || "").toLowerCase() === "approved";
-  const computedFullName =
-    finalData?.full_name || [firstName, lastName].filter(Boolean).join(" ");
+  const computedFullName = finalData?.full_name || [firstName, lastName].filter(Boolean).join(" ");
+  
+  const webhookResult = finalData?.webhook?.result;
+  const breakdown = finalData?.webhook?.breakdown || {};
+  
+  // Access nested breakdown fields safely
+  const visualAuth = breakdown?.visual_authenticity?.result;
+  const digitalTampering = breakdown?.visual_authenticity?.breakdown?.digital_tampering?.result;
 
-  const errorReason =
-    finalData?.webhook?.raw_payload?.payload?.resource?.error?.message ||
-    finalData?.webhook?.payload?.resource?.error?.message ||
-    (!isApproved ? "Verification requires manual review." : undefined);
+  // Robust address formatting
+  let addressStr = "—";
+  if (finalData?.address) {
+    if (typeof finalData.address === "string") {
+        addressStr = finalData.address;
+    } else if (typeof finalData.address === "object") {
+        // Extract address parts, handle line1 specifically as seen in payload
+        const { line1, town, state, country, postcode } = finalData.address;
+        addressStr = [line1, town, state, postcode, country].filter(Boolean).join(", ");
+    }
+  }
+
+  const errorReason = (!isApproved ? "Verification requires manual review." : undefined);
 
   return (
     <FullBg view={view} clickable={view === "home"} onActivate={() => setView("form")}>
@@ -306,65 +332,6 @@ export default function App() {
                   />
                 </label>
 
-                <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
-                  <label className="font-bold">
-                    Country (ISO3)
-                    <input
-                      value={country}
-                      onChange={(e) => setCountry(e.target.value.toUpperCase())}
-                      placeholder="ROU"
-                      maxLength={3}
-                      required
-                      className="mt-1 w-full rounded-xl border border-gray-300 px-4 py-3 text-base shadow-sm focus:border-black focus:outline-none"
-                    />
-                  </label>
-                  <label className="font-bold">
-                    City (Town)
-                    <input
-                      value={town}
-                      onChange={(e) => setTown(e.target.value)}
-                      required
-                      className="mt-1 w-full rounded-xl border border-gray-300 px-4 py-3 text-base shadow-sm focus:border-black focus:outline-none"
-                    />
-                  </label>
-                  <label className="font-bold">
-                    Zip (optional)
-                    <input
-                      value={postcode}
-                      onChange={(e) => setPostcode(e.target.value)}
-                      className="mt-1 w-full rounded-xl border border-gray-300 px-4 py-3 text-base shadow-sm focus:border-black focus:outline-none"
-                    />
-                  </label>
-                </div>
-
-                <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
-                  <label className="font-bold sm:col-span-2">
-                    Address
-                    <input
-                      value={address}
-                      onChange={(e) => setAddress(e.target.value)}
-                      placeholder="Ex: Street 123, Building X, Apt 10"
-                      required
-                      className="mt-1 w-full rounded-xl border border-gray-300 px-4 py-3 text-base shadow-sm focus:border-black focus:outline-none"
-                    />
-                  </label>
-
-                  {isUSA && (
-                  <label className="font-bold">
-                    State (USPS, required)
-                    <input
-                      value={state}
-                      onChange={(e) => setState(e.target.value.toUpperCase())}
-                      placeholder="CA, NY, TX..."
-                      maxLength={2}
-                      required
-                      className="mt-1 w-full rounded-xl border border-gray-300 px-4 py-3 text-base shadow-sm focus:border-black focus:outline-none"
-                    />
-                  </label>
-                )}
-
-                </div>
-
                 <div className="mt-2 flex gap-3">
                   <button
                     type="submit"
@@ -385,7 +352,6 @@ export default function App() {
           <WhiteScreen
             title="Thank you for uploading"
             subtitle="We are currently verifying your information. This may take a few minutes."
-            ok
             navbarUrl={CONFIG.navbars.success}
             onBack={closeAndCleanup}
           />
@@ -407,7 +373,7 @@ export default function App() {
 
         {view === "final" && finalData && (
           <WhiteScreen
-            title={isApproved ? "You're approved ✅" : "We need to do further verification"}
+            title={isApproved ? "You're approved ✅" : "Process Complete"}
             subtitle={
               isApproved
                 ? "Your verification looks good."
@@ -416,18 +382,25 @@ export default function App() {
             navbarUrl={isApproved ? CONFIG.navbars.success : CONFIG.navbars.failure}
             onBack={closeAndCleanup}
             onRetry={!isApproved ? () => setView("form") : undefined}
-            ok={isApproved}
             danger={!isApproved ? errorReason : undefined}
           >
             <div className="grid gap-4">
-              <InfoRow label="Verification status" value={finalData.status} />
+              <InfoRow label="Verification Status" value={finalData.status} />
               <InfoRow label="Full name" value={computedFullName || "—"} />
-              <InfoRow label="Address" value={finalData.address_formatted} />
+              
+              <InfoRow label="Address" value={addressStr} />
               <InfoRow label="Gender" value={finalData.gender} />
               <InfoRow label="Date of birth" value={finalData.dob} />
               <InfoRow label="Document number" value={finalData.document_number} />
               <InfoRow label="Document type" value={finalData.document_type} />
               <InfoRow label="Date of expiry" value={finalData.date_expiry} />
+
+              <div className="my-2 border-t border-gray-200"></div>
+              <h3 className="text-lg font-bold text-gray-900">Detailed Results</h3>
+              
+              <InfoRow label="Overall Result" value={webhookResult} isBadge />
+              <InfoRow label="Visual Authenticity" value={visualAuth} isBadge />
+              <InfoRow label="Digital Tampering" value={digitalTampering} isBadge />
             </div>
           </WhiteScreen>
         )}
