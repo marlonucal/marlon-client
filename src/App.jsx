@@ -359,7 +359,7 @@ export default function App() {
 
         {view === "error" && (
           <WhiteScreen
-            title="Something went wrong"
+            title="Issues encounter with verifying your identity!"
             subtitle="We couldn't complete your verification."
             danger={errorMsg}
             navbarUrl={CONFIG.navbars.failure}
@@ -373,11 +373,11 @@ export default function App() {
 
         {view === "final" && finalData && (
           <WhiteScreen
-            title={isApproved ? "You're approved ✅" : "Process Complete"}
+            title={isApproved ? "You have successfully verified your identity! ✅" : "Process Complete"}
             // Subtitle now only contains the phone number message
             subtitle={
               isApproved
-                ? "Your verification looks good."
+                ? "Let's proceed with the next step of your account opening."
                 : `Please call us at ${CONFIG.supportPhone} and reference ${CONFIG.referenceCode}.`
             }
             navbarUrl={isApproved ? CONFIG.navbars.success : CONFIG.navbars.failure}
