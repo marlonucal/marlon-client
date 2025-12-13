@@ -5,7 +5,6 @@ const CONFIG = {
   backgrounds: { home: "/bank2.png", form: "/bank2.png", workflow: "/bank2.png" },
   navbars: { success: "/results-banner.png", failure: "/results-banner.png" },
   supportPhone: "1 (800) 999-0000",
-  // MODIFICARE: Codul de referință cerut în poză
   referenceCode: "Onboarding Verification 05JX1-0WWE",
 };
 
@@ -167,6 +166,8 @@ function InfoRow({ label, value, isBadge }) {
   );
 }
 
+
+
 export default function App() {
   const [view, setView] = useState("home"); 
   const [firstName, setFirstName] = useState("");
@@ -180,6 +181,9 @@ export default function App() {
   const [finalData, setFinalData] = useState(null);
 
   const onfidoRef = useRef(null);
+  function isValidPhone(phone) {
+  return /^\+\d{9,12}$/.test(phone);
+}
 
   async function loadFinalData(id) {
     const [runData, webhookData] = await Promise.all([
@@ -214,10 +218,15 @@ export default function App() {
     e.preventDefault();
     setLoading(true);
     setErrorMsg("");
+    const rawPhone = phone.trim();
+      if (!isValidPhone(rawPhone)) {
+        setErrorMsg("Phone number must be in format +1234567890");
+        setLoading(false);
+        return;
+      }
 
     try {
-      const rawPhone = phone.trim();
-
+      
       const applicant = await fetchJSON(api(`/api/applicants`), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -280,7 +289,7 @@ export default function App() {
 
   const computedFullName = finalData?.full_name || [firstName, lastName].filter(Boolean).join(" ");
   const breakdown = finalData?.webhook?.breakdown || {};
-  const visualAuth = breakdown?.visual_authenticity?.result;
+  const visualAuth = breakdown?.visual_authenticity?.result ?? '-';
   const digitalTampering = breakdown?.visual_authenticity?.breakdown?.digital_tampering?.result;
   const securityFeatures = breakdown?.visual_authenticity?.breakdown?.security_features?.result;
 
@@ -299,8 +308,8 @@ export default function App() {
     }
   }
 
-  const subResultVal = (finalData?.sub_result || "").toLowerCase();
-  const isClear = subResultVal === "clear";
+  const runStatus = (finalData?.status || "").toLowerCase();
+const isApproved = runStatus === "approved";
 
   return (
     <FullBg view={view} clickable={view === "home"} onActivate={() => setView("form")}>
@@ -310,6 +319,12 @@ export default function App() {
             title={view === "form" ? "Applicant details" : "Verify your identity"}
             onClose={closeAndCleanup}
           >
+            {errorMsg && (
+            <div className="mb-4 rounded-xl border border-rose-200 bg-rose-50 p-3 text-rose-800 font-bold">
+              ⚠ {errorMsg}
+            </div>
+          )}
+
             {view === "form" ? (
               <form onSubmit={handleSubmit} className="grid gap-6 w-full">
                 <div className="grid grid-cols-1 gap-6 sm:grid-cols-2">
@@ -390,7 +405,10 @@ export default function App() {
             title="Thank you for uploading"
             subtitle="We are currently verifying your information. This may take a few minutes."
             navbarUrl={CONFIG.navbars.success}
-            onBack={closeAndCleanup}
+            onBack={() => {
+              closeAndCleanup();
+              setView("home");
+            }}
           >
              <div className="flex justify-center mt-12 mb-8">
                 <svg className="animate-spin h-10 w-10 text-gray-900" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
@@ -407,7 +425,10 @@ export default function App() {
             subtitle="We couldn't complete your verification."
             danger={errorMsg}
             navbarUrl={CONFIG.navbars.failure}
-            onBack={closeAndCleanup}
+            onBack={() => {
+              closeAndCleanup();
+              setView("home");
+            }}
             onRetry={() => {
               setView("form");
               setErrorMsg("");
@@ -417,19 +438,32 @@ export default function App() {
 
         {view === "final" && finalData && (
           <WhiteScreen
-            title={isClear ? "You have successfully verified your identity!✅" : "Process Complete"}
-            
+            title={
+              isApproved
+                ? "You have successfully verified your identity!✅"
+                : "Verification requires manual review"
+            }
+
             subtitle={
-              isClear
+              isApproved
                 ? "Let's proceed with the next step of your account opening."
                 : `Please call us at ${CONFIG.supportPhone} and reference ${CONFIG.referenceCode}.`
             }
-            navbarUrl={isClear ? CONFIG.navbars.success : CONFIG.navbars.failure}
-            onBack={closeAndCleanup}
-            
-            onRetry={undefined}
-            
-            danger={!isClear ? "Identity Verification will require additional review." : undefined}
+
+            navbarUrl={isApproved ? CONFIG.navbars.success : CONFIG.navbars.failure}
+
+            danger={
+              !isApproved
+                ? runStatus === "review"
+                  ? "Identity Verification will require additional review."
+                  : "Your identity verification was not successful."
+                : undefined
+            }
+            onBack={() => {
+              closeAndCleanup();
+              setView("home");
+            }}
+
           >
             <div className="grid gap-3 w-full">
               <h3 className="text-xl font-bold text-gray-900 mb-2">Detailed Results</h3>
