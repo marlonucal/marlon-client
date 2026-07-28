@@ -216,7 +216,7 @@ export default function App() {
   const [lastName, setLastName] = useState("");
   const [email, setEmail] = useState("");
   const [phone, setPhone] = useState(DUMMY_PHONE_DISPLAY);
-  const [isUsCitizen, setIsUsCitizen] = useState("no");
+
 
   const [loading, setLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState("");
@@ -530,7 +530,6 @@ export default function App() {
     setLastName("");
     setEmail("");
     setPhone(DUMMY_PHONE_DISPLAY);
-    setIsUsCitizen("no");
   }
 
   const computedFullName = finalData?.full_name || [firstName, lastName].filter(Boolean).join(" ");
@@ -637,17 +636,7 @@ const meta = runStatus === "approved" ? approvedMeta : nonApprovedMeta;
                   </label>
                 </div>
 
-                <label className="block">
-                  <span className="block text-sm font-bold text-gray-700 mb-1">Are you a US Citizen?</span>
-                  <select
-                    value={isUsCitizen}
-                    onChange={(e) => setIsUsCitizen(e.target.value)}
-                    className="w-full rounded-xl border-gray-300 px-4 py-3 text-base shadow-sm focus:border-black focus:ring-black bg-white transition"
-                  >
-                    <option value="yes">Yes</option>
-                    <option value="no">No</option>
-                  </select>
-                </label>
+                
 
                 <div className="mt-4">
                   <button
